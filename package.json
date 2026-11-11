@@ -1,0 +1,35 @@
+{
+    "name": "@spacexr/terrain-workspace",
+    "version": "0.0.0",
+    "private": true,
+    "description": "Renderer-neutral raster, DEM and grid packages for the shared 3D Tiles runtime.",
+    "license": "Apache-2.0",
+    "author": "Guillaume Pelletier (SpaceXR)",
+    "type": "module",
+    "engines": {
+        "node": ">=20.11.0"
+    },
+    "workspaces": [
+        "packages/raster",
+        "packages/dem",
+        "packages/grid",
+        "packages/vector"
+    ],
+    "overrides": {
+        "esbuild": "0.28.2"
+    },
+    "scripts": {
+        "build": "npm run build --workspace @spacexr/raster --workspace @spacexr/dem --workspace @spacexr/grid --workspace @spacexr/vector",
+        "clean": "npm run clean --workspaces --if-present",
+        "typecheck": "npm run typecheck --workspaces --if-present",
+        "test": "npm run test --workspaces --if-present",
+        "lint": "npm run lint --workspaces --if-present",
+        "lint:fix": "npm run lint:fix --workspaces --if-present",
+        "format": "npm run format --workspaces --if-present",
+        "format:fix": "npm run format:fix --workspaces --if-present",
+        "check": "npm run format && npm run lint && npm run typecheck && npm run test && npm run build"
+    },
+    "dependencies": {
+        "@spacexr/tiles": "file:../3d-tiles-core/node/packages/tiles"
+    }
+}

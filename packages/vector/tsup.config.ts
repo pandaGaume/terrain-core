@@ -1,0 +1,6 @@
+import { defineConfig } from "tsup";
+export default defineConfig({
+    entry: { index: "src/index.ts", browser: "src/browser.ts" }, format: ["esm"], dts: true,
+    sourcemap: true, clean: true, target: "es2022", platform: "neutral", outDir: "dist",
+    splitting: false, treeshake: true, external: ["@spacexr/tiles", "@spacexr/raster"],
+});
