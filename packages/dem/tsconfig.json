@@ -29,10 +29,10 @@
                 "../raster/src/index.ts"
             ],
             "@spacexr/tiles": [
-                "../../../3d-tiles-core/node/packages/tiles/src/index.ts"
+                "../../../spacexr-tiling/packages/tiles/src/index.ts"
             ],
             "@spacexr/tiles/*": [
-                "../../../3d-tiles-core/node/packages/tiles/src/*"
+                "../../../spacexr-tiling/packages/tiles/src/*"
             ]
         }
     },
