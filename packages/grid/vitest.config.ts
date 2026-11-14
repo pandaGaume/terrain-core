@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
     resolve: {
         alias: {
-            "@spacexr/tiles": fileURLToPath(new URL("../../../3d-tiles-core/node/packages/tiles/src/index.ts", import.meta.url)),
+            "@spacexr/tiles": fileURLToPath(new URL("../../../spacexr-tiling/packages/tiles/src/index.ts", import.meta.url)),
         },
     },
     test: {
