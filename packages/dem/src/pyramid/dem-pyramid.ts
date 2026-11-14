@@ -1,7 +1,7 @@
 import { RasterPyramid, type IRasterPyramidOptions } from "@spacexr/raster";
-import type { ITileAddress, TileContentLoader } from "@spacexr/tiles";
+import type { CelestialTileSource, ITileAddress, TileContentLoader } from "@spacexr/tiles";
 
-import { createHeightGrid, type IDemDecoder, type IHeightGrid, type IHeightRange, type QuadrantHeightRanges } from "../codecs";
+import { createHeightGrid, type DemEncoding, type IDemDecoder, type IHeightGrid, type IHeightRange, type QuadrantHeightRanges } from "../codecs";
 import type { IDemTileSource } from "../sources";
 import type { ChildHeightRanges } from "./child-height-ranges";
 
@@ -13,6 +13,47 @@ export function webDemTileLoader(source: IDemTileSource, decoder: IDemDecoder): 
         // The pyramid needs heights and their range, not the extra statistics of a standalone DemInfos tile.
         return decoder.decodeDem(result.bytes, source.encoding, signal ? { signal } : {});
     };
+}
+
+/**
+ * Loader fetching and decoding the tiles of an elevation dataset of a tile service. Its tiles hold radial heights and
+ * their shared edges.
+ *
+ * @throws RangeError When the dataset does not hold elevation.
+ */
+export function cubeDemTileLoader(source: CelestialTileSource, decoder: IDemDecoder): TileContentLoader<IHeightGrid> {
+    const { content, encoding } = source.dataset;
+    if (content !== "elevation") throw new RangeError(`Dataset of ${source.dataset.body} holds ${content}, not elevation.`);
+    return async (address, signal) => {
+        const result = await source.fetchTile(address, signal);
+        return result.status === "absent" ? undefined : decoder.decodeDem(result.bytes, encoding as DemEncoding, undefined);
+    };
+}
+
+/** Options of {@link cubeDemPyramid}. */
+export interface ICubeDemPyramidOptions extends Pick<IDemPyramidOptions, "cacheEntries" | "abortDelayMilliseconds" | "childHeightRanges" | "onStitched"> {
+    /**
+     * Deepest level of generated tiles, which interpolate the dataset bilinearly below its deepest level, the same everywhere.
+     * Defaults to none: a tile deeper than the dataset at its place, inside or outside its subtrees, reads a sub-area of the
+     * deepest tile there. A slope read on generated tiles is constant by parts, which shows as a checkerboard in lighting: a
+     * renderer computing normals from the samples should leave it unset.
+     */
+    maxLOD?: number;
+}
+
+/**
+ * The heights of an elevation dataset of a tile service as one surface per face of the cube. Tiles keep their shared
+ * edges, and a tile the dataset does not declare reads a sub-area of the deepest tile at its place.
+ */
+export function cubeDemPyramid(source: CelestialTileSource, decoder: IDemDecoder, options: ICubeDemPyramidOptions = {}): DemPyramid {
+    const { maxLOD, ...rest } = options;
+    return new DemPyramid({
+        ...rest,
+        registration: "point",
+        maxLOD: source.deepestLOD,
+        load: cubeDemTileLoader(source, decoder),
+        ...(maxLOD !== undefined && maxLOD > source.deepestLOD ? { generation: { maxLOD } } : { servingLevel: (address: ITileAddress) => source.servingLevel(address) }),
+    });
 }
 
 export interface IDemPyramidOptions extends Omit<IRasterPyramidOptions<IHeightGrid>, "create"> {
