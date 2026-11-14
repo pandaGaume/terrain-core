@@ -1,0 +1,68 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "lib": [
+            "ES2022",
+            "DOM"
+        ],
+        "types": [
+            "node"
+        ],
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noUnusedLocals": true,
+        "declaration": true,
+        "sourceMap": true,
+        "removeComments": false,
+        "importHelpers": true,
+        "isolatedModules": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "baseUrl": ".",
+        "paths": {
+            "@spacexr/3d-tiles-core": [
+                "../../../3d-tiles-core/node/packages/core/src/index.ts"
+            ],
+            "@spacexr/3d-tiles-core/*": [
+                "../../../3d-tiles-core/node/packages/core/src/*"
+            ],
+            "@spacexr/3d-tiles-runtime": [
+                "../../../3d-tiles-core/node/packages/runtime/src/index.ts"
+            ],
+            "@spacexr/3d-tiles-runtime/*": [
+                "../../../3d-tiles-core/node/packages/runtime/src/*"
+            ],
+            "@spacexr/dem": [
+                "../dem/src/index.ts"
+            ],
+            "@spacexr/grid": [
+                "../grid/src/index.ts"
+            ],
+            "@spacexr/raster": [
+                "../raster/src/index.ts"
+            ],
+            "@spacexr/tiles": [
+                "../../../spacexr-tiling/packages/tiles/src/index.ts"
+            ],
+            "@spacexr/tiles/*": [
+                "../../../spacexr-tiling/packages/tiles/src/*"
+            ]
+        }
+    },
+    "include": [
+        "src/**/*.ts",
+        "tests/**/*.ts",
+        "vitest.config.ts",
+        "tsup.config.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist",
+        "coverage"
+    ]
+}

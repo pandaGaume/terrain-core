@@ -13,13 +13,14 @@
         "packages/raster",
         "packages/dem",
         "packages/grid",
-        "packages/vector"
+        "packages/vector",
+        "packages/terrain-tileset"
     ],
     "overrides": {
         "esbuild": "0.28.2"
     },
     "scripts": {
-        "build": "npm run build --workspace @spacexr/raster --workspace @spacexr/dem --workspace @spacexr/grid --workspace @spacexr/vector",
+        "build": "npm run build --workspace @spacexr/raster --workspace @spacexr/dem --workspace @spacexr/grid --workspace @spacexr/vector --workspace @spacexr/terrain-tileset",
         "clean": "npm run clean --workspaces --if-present",
         "typecheck": "npm run typecheck --workspaces --if-present",
         "test": "npm run test --workspaces --if-present",
@@ -30,6 +31,8 @@
         "check": "npm run format && npm run lint && npm run typecheck && npm run test && npm run build"
     },
     "dependencies": {
-        "@spacexr/tiles": "file:../spacexr-tiling/packages/tiles"
+        "@spacexr/tiles": "file:../spacexr-tiling/packages/tiles",
+        "@spacexr/3d-tiles-core": "file:../3d-tiles-core/node/packages/core",
+        "@spacexr/3d-tiles-runtime": "file:../3d-tiles-core/node/packages/runtime"
     }
 }

@@ -1,6 +1,6 @@
 # Terrain Core
 
-Owns `@spacexr/raster`, `@spacexr/dem` and `@spacexr/grid` in `packages/`.
+Owns `@spacexr/raster`, `@spacexr/dem`, `@spacexr/grid`, `@spacexr/vector` and `@spacexr/terrain-tileset` in `packages/`. `@spacexr/terrain-tileset` presents tiling schemes and terrain grids as implicit 3D Tiles; it is the only package here that depends on the 3D Tiles runtime.
 `@spacexr/tiles` (tile addressing, topologies and tiling schemes) lives in the sibling `spacexr-tiling` repository. 3D Tiles contracts and the single runtime remain in the sibling `3d-tiles-core` repository.
 Keep terrain algorithms renderer-neutral. Do not introduce another selector or runtime.
 Prefix TypeScript interfaces with `I`. Document units, reference frames and raster registration.

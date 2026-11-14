@@ -2,14 +2,15 @@
 
 Renderer-neutral rasters, elevation and grids for the existing SpaceXR framework. The terrain is exposed through implicit 3D Tiles and uses the single runtime in `3d-tiles-core`.
 
-| Package | Responsibility |
-| --- | --- |
-| `@spacexr/raster` | Raster grids, sampling, image decoding, stitching and draping calculations |
-| `@spacexr/dem` | Elevation codecs, providers, pyramids, gradients and surfaces |
-| `@spacexr/grid` | Reusable grid topology, junctions and CPU geometry |
-| `@spacexr/vector` | Per-LOD vector variants and cached transparent raster tiles |
+| Package                    | Responsibility                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| `@spacexr/raster`          | Raster grids, sampling, image decoding, stitching and draping calculations             |
+| `@spacexr/dem`             | Elevation codecs, providers, pyramids, gradients and surfaces                          |
+| `@spacexr/grid`            | Reusable grid topology, junctions and CPU geometry                                     |
+| `@spacexr/terrain-tileset` | Terrain tilings (Web Mercator, cube), grid sources and their implicit 3D Tiles bridges |
+| `@spacexr/vector`          | Per-LOD vector variants and cached transparent raster tiles                            |
 
-Package identities and current local version 0.1.0 are preserved. Physical configuration is now explicit; cube APIs and provider preset exports have been removed. The packages were extracted from `3d-tiles-core/node/packages` without changing algorithms. Tile addressing, generic pyramids and the single selector remain in `@spacexr/tiles` and `@spacexr/3d-tiles-runtime`.
+Package identities and current local version 0.1.0 are preserved. Physical configuration is now explicit; provider preset exports have been removed. The cube scheme comes from `@spacexr/tiles` (spacexr-tiling); `@spacexr/dem` reads cube datasets (`cubeDemPyramid`) and `@spacexr/terrain-tileset` presents them as tilesets. The packages were extracted from `3d-tiles-core/node/packages` without changing algorithms. Tile addressing, generic pyramids and the single selector remain in `@spacexr/tiles` and `@spacexr/3d-tiles-runtime`.
 
 ## Development
 
