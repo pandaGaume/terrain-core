@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../dem/COMPONENT.md
 import { TileNeighbor, TilePyramid, parentTileAddress, tileNeighborAddress, type ITileAddress, type ITileAreaInAncestor, type ITilePyramidOptions } from "@spacexr/tiles";
 
 import type { IRasterGrid } from "./raster-grid";

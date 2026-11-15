@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 /** Vector with ECEF components. */
 export interface IEcefVector {
     x: number;

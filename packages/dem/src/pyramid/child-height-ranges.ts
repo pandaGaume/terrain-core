@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import { childTileAddresses, tileAddressKey, type ITileAddress } from "@spacexr/tiles";
 
 import type { QuadrantHeightRanges } from "../codecs";

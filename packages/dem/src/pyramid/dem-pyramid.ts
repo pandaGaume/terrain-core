@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import { RasterPyramid, type IRasterPyramidOptions } from "@spacexr/raster";
 import type { CelestialTileSource, ITileAddress, TileContentLoader } from "@spacexr/tiles";
 

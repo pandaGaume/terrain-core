@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import { assertRasterSize, type IRasterGrid, type IRgbaImage } from "@spacexr/raster";
 
 /** Height represented by one increment of the Terrarium blue channel, in metres. */

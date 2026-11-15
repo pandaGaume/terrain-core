@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../dem/COMPONENT.md
 import {
     TileNeighbor,
     assertRasterRegistration,

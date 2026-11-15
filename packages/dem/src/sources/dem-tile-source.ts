@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import type { WebTileSource } from "@spacexr/tiles";
 import type { DemEncoding } from "../codecs";
 

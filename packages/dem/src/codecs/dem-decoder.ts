@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import { BrowserImageDecoder, type IImageDecoder } from "@spacexr/raster";
 
 import { createHeightGrid, decodeHeightGrid, type DemEncoding, type IDecodeHeightGridOptions, type IHeightGrid } from "./dem";
