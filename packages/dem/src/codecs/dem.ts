@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import { assertRasterSize, type IImageDecoder, type IRasterGrid, type IRgbaImage } from "@spacexr/raster";
 
 /**

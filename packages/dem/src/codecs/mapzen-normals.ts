@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import { PngDataDecoder, assertRasterSize, type IImageDecoder, type IRasterGrid, type IRgbaImage } from "@spacexr/raster";
 
 /** Unit tangent-space surface normals, XYZ per sample. An invalid zero encoded vector is NaN in every channel. */

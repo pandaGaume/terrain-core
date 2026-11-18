@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import { Tile, type ITileAddress } from "@spacexr/tiles";
 
 import { DemInfos, computeGridNormals, type IDecodeHeightGridOptions, type IDemDecoder } from "../codecs";

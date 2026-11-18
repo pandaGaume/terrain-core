@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../dem/COMPONENT.md
 import type { IImageDecoder, IRgbaImage } from "./image";
 
 const SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];

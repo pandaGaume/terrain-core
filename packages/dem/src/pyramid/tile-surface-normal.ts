@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import type { GeodeticSystem } from "@spacexr/geodesy";
 import type { ICartesian3, ITileAddress, ITileSurface, ReferenceSurface } from "@spacexr/tiles";
 

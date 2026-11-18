@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../dem/COMPONENT.md
 import type { RasterRegistration } from "@spacexr/tiles";
 
 import type { IRasterGrid } from "./raster-grid";

@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../COMPONENT.md
 import { sampleSpan, type IRasterRange } from "@spacexr/raster";
 
 import { createHeightGrid, type IHeightGrid } from "./dem";

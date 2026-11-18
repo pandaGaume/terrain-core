@@ -1,3 +1,4 @@
+// Component: SPX-DEM-001; documentation: ../../dem/COMPONENT.md
 import type { IRasterGrid } from "./raster-grid";
 
 /** Decoded image with 8-bit RGBA pixels, row-major from the top-left corner: a raster of four channels. */

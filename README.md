@@ -7,6 +7,7 @@ Renderer-neutral rasters, elevation and grids for the existing SpaceXR framework
 | `@spacexr/raster`          | Raster grids, sampling, image decoding, stitching and draping calculations             |
 | `@spacexr/dem`             | Elevation codecs, providers, pyramids, gradients and surfaces                          |
 | `@spacexr/grid`            | Reusable grid topology, junctions and CPU geometry                                     |
+| `@spacexr/ceiling`         | Ceiling of an underground chamber under a reference surface, and a convex hull         |
 | `@spacexr/terrain-tileset` | Terrain tilings (Web Mercator, cube), grid sources and their implicit 3D Tiles bridges |
 | `@spacexr/vector`          | Per-LOD vector variants and cached transparent raster tiles                            |
 
@@ -25,6 +26,7 @@ Open `terrain-core.code-workspace` or `../spacexr-rendering/SpaceXR-Framework.co
 - [Rasters](docs/raster.md)
 - [Elevation](docs/dem.md)
 - [Grid topology](docs/grid.md)
+- [Ceiling of an underground chamber](docs/ceiling.md)
 - [Draping](docs/draping.md)
 - [Migration and consumers](docs/migration.md)
 - [Rendering and reference examples](../spacexr-rendering/README.md)
