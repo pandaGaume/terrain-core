@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildRockFace, createRockField, createUnderSurfaceVolume, growChamber, type IRockFace, type IRockFaceInput } from "../src";
+import { buildRockFace, convexHull, createRockField, createUnderSurfaceVolume, growChamber, type IRockFace, type IRockFaceInput } from "../src";
 
 /** An octahedron of a radius around a centre, wound outwards. */
 function octahedron(radius: number, centre: [number, number, number] = [0, 0, 0]): IRockFaceInput {
@@ -9,6 +9,12 @@ function octahedron(radius: number, centre: [number, number, number] = [0, 0, 0]
         positions: [cx + radius, cy, cz, cx - radius, cy, cz, cx, cy + radius, cz, cx, cy - radius, cz, cx, cy, cz + radius, cx, cy, cz - radius],
         indices: [0, 2, 4, 2, 1, 4, 1, 3, 4, 3, 0, 4, 2, 0, 5, 1, 2, 5, 3, 1, 5, 0, 3, 5],
     };
+}
+
+/** A convex solid by its corners, wound outwards. */
+function solid(corners: [number, number, number][]): IRockFaceInput {
+    const hull = convexHull(corners.map(([x, y, z]) => ({ x, y, z })))!;
+    return { positions: hull.vertices.flatMap((point) => [point.x, point.y, point.z]), indices: hull.indices };
 }
 
 /** Each edge of a closed surface is met twice, once in each direction, and it has the topology of a sphere. */
@@ -54,6 +60,18 @@ describe("buildRockFace", () => {
         expectClosed(face);
         // No displacement asked: the refined mesh lies on the input.
         expect(face.report.displacement).toEqual({ min: 0, max: 0, mean: 0 });
+    });
+
+    it("splits only the edges that are too long", () => {
+        // An octahedron stretched three times along x: its edges to the two tips on x are long, the others not.
+        const input = octahedron(100);
+        const positions = Array.from(input.positions, (value, at) => (at % 3 === 0 ? value * 3 : value));
+        const face = buildRockFace({ positions, indices: input.indices }, { edgeLength: 200, maxDisplacement: 0 });
+        expect(face.report.refinements).toBe(1);
+        // The eight edges to the tips are split, the four round the middle are not: each face in three, not in four.
+        expect(face.report.triangles).toBe(8 * 3);
+        expect(longest(face)).toBeLessThanOrEqual(200);
+        expectClosed(face);
     });
 
     it("moves each vertex along its normal into the rock, never further than the limit", () => {
@@ -132,6 +150,71 @@ describe("buildRockFace", () => {
             expect(Math.abs(held.displacement[v]!)).toBeLessThanOrEqual(Math.abs(free.displacement[v]!) + 1e-12);
         }
         expect(crossedFree).toBeGreaterThan(0);
+    });
+
+    it("stops the walls of a thin void, and the faces of a thin slab of rock, short of each other", () => {
+        // 40 m by 40 m and 1 m thick: a void in the rock, then a slab of rock in a void.
+        const corners: [number, number, number][] = [];
+        for (const x of [-20, 20]) for (const y of [-20, 20]) for (const z of [-0.5, 0.5]) corners.push([x, y, z]);
+        // The field stands back into the rock round the origin and comes forward round (-40, 400): each case is read
+        // where the field moves the faces towards each other.
+        const cases = [
+            { towardsRock: 1, origin: [40, -400, 0] },
+            { towardsRock: -1, origin: [0, 0, 0] },
+        ] as const;
+        for (const { towardsRock, origin } of cases) {
+            const options = { edgeLength: 2, scale: 0.1, towardsRock, origin };
+            const flat = buildRockFace(solid(corners), { ...options, maxDisplacement: 0 });
+            const face = buildRockFace(solid(corners), { ...options, maxDisplacement: 2 });
+            expectClosed(face);
+            expect(face.report.limited).toBeGreaterThan(0);
+            let inwards = 0;
+            for (let v = 0; v < face.positions.length / 3; v++) {
+                const was = flat.positions[v * 3 + 2]!,
+                    is = face.positions[v * 3 + 2]!;
+                if (Math.abs(was) !== 0.5) continue;
+                // Each face keeps its side of the middle. The room is half the thickness, and a move takes 0.4 of it.
+                expect(Math.sign(is)).toBe(Math.sign(was));
+                expect(Math.abs(is)).toBeGreaterThanOrEqual(0.5 - 0.2 - 1e-9);
+                if (Math.abs(is) < 0.45) inwards++;
+            }
+            // Without the limit these would have gone through the other face: the field asks for up to 2 m.
+            expect(inwards).toBeGreaterThan(0);
+        }
+    });
+
+    it("turns no face over at the ridge of a wedge of rock", () => {
+        // A wedge of rock in a void, 30 m long, whose two faces meet at 15 degrees along the y axis.
+        const half = 20 * Math.tan((7.5 * Math.PI) / 180);
+        const corners: [number, number, number][] = [
+            [0, 0, 0],
+            [0, 30, 0],
+            [20, 0, half],
+            [20, 30, half],
+            [20, 0, -half],
+            [20, 30, -half],
+        ];
+        const options = { edgeLength: 1.5, scale: 0.1, towardsRock: -1 as const };
+        const flat = buildRockFace(solid(corners), { ...options, maxDisplacement: 0 });
+        const face = buildRockFace(solid(corners), { ...options, maxDisplacement: 2 });
+        expectClosed(face);
+        expect(face.report.limited).toBeGreaterThan(0);
+        const normal = (positions: ArrayLike<number>, at: number): number[] => {
+            const [a, b, c] = [face.indices[at]! * 3, face.indices[at + 1]! * 3, face.indices[at + 2]! * 3];
+            const u = [0, 1, 2].map((axis) => positions[b + axis]! - positions[a + axis]!);
+            const w = [0, 1, 2].map((axis) => positions[c + axis]! - positions[a + axis]!);
+            return [u[1]! * w[2]! - u[2]! * w[1]!, u[2]! * w[0]! - u[0]! * w[2]!, u[0]! * w[1]! - u[1]! * w[0]!];
+        };
+        for (let at = 0; at < face.indices.length; at += 3) {
+            const was = normal(flat.positions, at),
+                is = normal(face.positions, at);
+            expect(was[0]! * is[0]! + was[1]! * is[1]! + was[2]! * is[2]!).toBeGreaterThan(0);
+        }
+        // The two faces of the wedge do not pass each other: each vertex stays on its side of the middle.
+        for (let v = 0; v < face.positions.length / 3; v++) {
+            const was = flat.positions[v * 3 + 2]!;
+            if (Math.abs(was) > 1e-9) expect(face.positions[v * 3 + 2]! * Math.sign(was)).toBeGreaterThan(0);
+        }
     });
 
     it("refuses what it cannot do", () => {

@@ -74,7 +74,7 @@ Attraction 1 keeps the clearance around each object; attraction 0 fills the hull
 
 ## Rock face
 
-`buildRockFace` turns any closed mesh, a chamber among others, into a rock face seen from inside: refined, then moved along its normals into the rock by an erosion field (fissures, ledges, faults), within a limit.
+`buildRockFace` turns any closed mesh, a chamber among others, into a rock face seen from inside: refined, then moved along its normals into the rock by an erosion field (fissures, ledges, faults), within a limit. Where the rock or the void is thin, as the wedge of rock between a tunnel and the chamber it opens into, each move is cut to a share of the room ahead of it, so that the face does not cross itself; `face.report.limited` counts those vertices.
 
 ```ts
 import { buildRockFace, growChamber } from "@spacexr/ceiling";

@@ -68,6 +68,7 @@ export interface IGrowChamberOptions {
     step?: number;
     maxVertices?: number;
     maxSteps?: number;
+    fuse?: boolean;
 }
 
 /** What {@link growChamber} met, with the report of the growth. */
@@ -329,7 +330,16 @@ function meshContains(mesh: IGrownSurfaceMesh, point: IPoint3): boolean {
  * The surface starts in the largest object that has room for its starting sphere, trying smaller spheres if none
  * has. It fills the part of the volume connected to that seed only: the report lists the objects left out.
  */
-export function growChamber(input: IChamberInput, options: IGrowChamberOptions = {}): { volume: IVolume; mesh: IGrownSurfaceMesh; report: IChamberReport } {
+export function growChamber(
+    input: IChamberInput,
+    options: IGrowChamberOptions = {}
+): {
+    volume: IVolume;
+    mesh: IGrownSurfaceMesh;
+    report: IChamberReport;
+    /** Where fronts of the surface met, the two points of each meeting: what `fuseByTexels` starts from. */
+    meetings: Float64Array;
+} {
     const { shapes, outer, footprint } = createShapes(input);
     const volume = chamberVolume(input, shapes, outer, footprint);
     const { edgeLength } = input.settings;
@@ -353,6 +363,7 @@ export function growChamber(input: IChamberInput, options: IGrowChamberOptions =
                     step: options.step,
                     maxVertices: options.maxVertices,
                     maxSteps: options.maxSteps,
+                    fuse: options.fuse,
                 });
             } catch (error) {
                 if (!(error instanceof RangeError)) throw error;
@@ -366,11 +377,13 @@ export function growChamber(input: IChamberInput, options: IGrowChamberOptions =
     }
     if (!surface || !seed) throw new RangeError("No object of the chamber has room for the seed of its surface: check the depths, the clearance and the edge length.");
 
-    const growth = surface.grow();
+    surface.grow();
+    // The mesh first: it fuses the fronts that met, which the report then tells.
     const mesh = surface.mesh();
+    const growth = surface.report();
     const unreached: number[] = [];
     shapes.forEach((shape, index) => {
         if (!shape || !meshContains(mesh, shape.centre)) unreached.push(index);
     });
-    return { volume, mesh, report: { ...growth, seed: { ...seed }, seedRadius, unreached } };
+    return { volume, mesh, report: { ...growth, seed: { ...seed }, seedRadius, unreached }, meetings: surface.meetingPoints() };
 }

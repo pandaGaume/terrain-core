@@ -1,3 +1,4 @@
+import { fuseContacts, type IFuseReport } from "./fuse";
 import type { IPoint3 } from "./quickhull";
 
 /**
@@ -27,6 +28,12 @@ export interface IGrownSurfaceOptions {
     maxVertices?: number;
     /** {@link GrownSurface.grow} gives up after this number of steps. Defaults to 10 000. */
     maxSteps?: number;
+    /**
+     * Whether {@link GrownSurface.mesh} fuses the fronts that met into one surface (see `fuseContacts`) instead of
+     * leaving a thin wall where they stopped. Defaults to false: the fusion fills a ring, but on a network of
+     * chambers and tunnels its walls are ragged, many holes find no hole facing them and are closed by fans.
+     */
+    fuse?: boolean;
 }
 
 /** A closed triangle mesh, wound counter-clockwise seen from outside. */
@@ -53,6 +60,8 @@ export interface IGrowthReport {
     settled: number;
     /** Vertices fixed inside the volume because another front of the surface was coming the other way. */
     contact: number;
+    /** What the fusion of the fronts did, once {@link GrownSurface.mesh} has fused them; null before or without it. */
+    fusion: IFuseReport | null;
     /** Face centres that stood outside the volume and could not be brought back inside. */
     unresolved: number;
     /** Whether the growth ended by itself: no vertex moves and no face is to split. */
@@ -72,6 +81,8 @@ const SMOOTHING = 0.4;
 const CONTACT = 0.9;
 /** Two vertices face each other when the cosine of the angle between their normals is under this. */
 const FACING = -0.2;
+/** Points of the segment between two fronts where the volume is asked whether they face each other across it. */
+const BETWEEN = [0.2, 0.4, 0.6, 0.8] as const;
 
 /** Key of a cell of the grid of vertices. Two cells can share a key: a vertex is then tested for nothing. */
 function cellKey(x: number, y: number, z: number): number {
@@ -128,15 +139,22 @@ const ICOSAHEDRON_FACES: readonly (readonly [number, number, number])[] = [
  * neighbours and keeps the triangles regular. No vertex is ever removed, so each stage holds the vertices of the
  * stages before.
  *
- * The surface keeps the topology of a sphere. Inside a volume with a hole through it, such as a ring, the two fronts
- * that go round the hole stop short of each other: they leave a thin wall across the volume where they met, about
- * the edge length thick, and the report counts their vertices (`contact`).
+ * While it grows, the surface keeps the topology of a sphere. Where two of its fronts come face to face across the
+ * volume, they stop short of each other, the edge length apart, and the report counts their vertices (`contact`):
+ * so do the two fronts that go round the hole of a ring, and the sides of a front that pushes through a narrow
+ * opening into a larger room and curls round it. {@link GrownSurface.mesh} then fuses them (`fuseContacts`): the
+ * thin wall they make is taken away and the fronts are sewn into one surface, which can have holes through it, as
+ * the volume does.
  */
 export class GrownSurface {
     private readonly volume: IVolume;
     private readonly positions: number[] = [];
     private readonly faces: number[] = [];
     private readonly states: number[] = [];
+    private readonly fuse: boolean;
+    private fusion: IFuseReport | null = null;
+    /** Pairs of vertices where two fronts met: the vertex that stopped, and the vertex of the front it met. */
+    private readonly meetings: number[] = [];
     /** Face on the left of each directed edge. */
     private readonly edges = new Map<number, number>();
     private readonly edgeLength: number;
@@ -168,6 +186,7 @@ export class GrownSurface {
         this.maxArea = (Math.sqrt(3) / 4) * edgeLength * edgeLength;
         this.maxVertices = options.maxVertices ?? 200_000;
         this.maxSteps = options.maxSteps ?? 10_000;
+        this.fuse = options.fuse ?? false;
 
         const scale = seedRadius / Math.hypot(1, GOLDEN);
         for (const [x, y, z] of ICOSAHEDRON_VERTICES) {
@@ -212,14 +231,32 @@ export class GrownSurface {
             squeezed: this.squeezed,
             settled: this.settled,
             contact: this.contact,
+            fusion: this.fusion,
             unresolved: this.unresolved,
             complete: this.complete,
         };
     }
 
-    /** The surface as it stands, copied. */
+    /** Where fronts met: for each meeting, the points of the two vertices, `x, y, z` then `x, y, z`. */
+    public meetingPoints(): Float64Array {
+        const out = new Float64Array(this.meetings.length * 3);
+        this.meetings.forEach((v, at) => out.set([this.positions[v * 3]!, this.positions[v * 3 + 1]!, this.positions[v * 3 + 2]!], at * 3));
+        return out;
+    }
+
+    /** The surface as it stands, copied: with the fronts that met fused into one, unless asked otherwise. */
     public mesh(): IGrownSurfaceMesh {
-        return { positions: Float64Array.from(this.positions), indices: Uint32Array.from(this.faces), fixed: Uint8Array.from(this.states) };
+        if (!this.fuse || this.contact === 0) return { positions: Float64Array.from(this.positions), indices: Uint32Array.from(this.faces), fixed: Uint8Array.from(this.states) };
+        // A wall is about the distance at which two fronts stopped: a little more, to take both of its sides.
+        const fused = fuseContacts({
+            positions: this.positions,
+            indices: this.faces,
+            meetings: this.meetings,
+            volume: this.volume,
+            reach: this.edgeLength * (CONTACT + 0.3),
+        });
+        this.fusion = fused.report;
+        return { positions: fused.positions, indices: fused.indices, fixed: Uint8Array.from(fused.kept, (v) => this.states[v]!) };
     }
 
     private addFace(a: number, b: number, c: number): number {
@@ -324,8 +361,13 @@ export class GrownSurface {
             heads.set(key, v);
         }
         const reach = cell * CONTACT;
-        /** Whether another part of the surface, facing a vertex and ahead of it, is within reach of where it goes. */
-        const meets = (v: number, qx: number, qy: number, qz: number): boolean => {
+        /** Whether a point of the segment between two points stands outside the volume. */
+        const rockBetween = (ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean => {
+            for (const t of BETWEEN) if (!volume.contains(ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t)) return true;
+            return false;
+        };
+        /** A vertex of another part of the surface, facing a vertex and ahead of it, within reach of where it goes; or -1. */
+        const meets = (v: number, qx: number, qy: number, qz: number): number => {
             const nx = normals[v * 3]!;
             const ny = normals[v * 3 + 1]!;
             const nz = normals[v * 3 + 2]!;
@@ -342,12 +384,16 @@ export class GrownSurface {
                             const wy = positions[w * 3 + 1]!;
                             const wz = positions[w * 3 + 2]!;
                             if ((wx - positions[v * 3]!) * nx + (wy - positions[v * 3 + 1]!) * ny + (wz - positions[v * 3 + 2]!) * nz <= 0) continue;
-                            if ((wx - qx) ** 2 + (wy - qy) ** 2 + (wz - qz) ** 2 < reach * reach) return true;
+                            if ((wx - qx) ** 2 + (wy - qy) ** 2 + (wz - qz) ** 2 >= reach * reach) continue;
+                            // Two fronts meet only across the volume. With rock between them, as on either side of the
+                            // edge where a tunnel opens into a chamber, each goes on to its own wall.
+                            if (rockBetween(qx, qy, qz, wx, wy, wz)) continue;
+                            return w;
                         }
                     }
                 }
             }
-            return false;
+            return -1;
         };
 
         let moved = false;
@@ -378,9 +424,12 @@ export class GrownSurface {
                 this.settled++;
                 continue;
             }
-            if (meets(v, px + dx, py + dy, pz + dz)) {
-                // Another front of the surface is coming the other way: both stop short of each other.
+            const met = meets(v, px + dx, py + dy, pz + dz);
+            if (met >= 0) {
+                // Another front of the surface is coming the other way: both stop short of each other. Where they met
+                // is kept: the fusion starts from there.
                 states[v] = FIXED;
+                this.meetings.push(v, met);
                 this.contact++;
                 continue;
             }
@@ -555,6 +604,8 @@ export class GrownSurface {
 /** Grows a surface from a sphere until a volume stops it: see {@link GrownSurface}. */
 export function growSurface(volume: IVolume, options: IGrownSurfaceOptions): { mesh: IGrownSurfaceMesh; report: IGrowthReport } {
     const surface = new GrownSurface(volume, options);
-    const report = surface.grow();
-    return { mesh: surface.mesh(), report };
+    surface.grow();
+    // The mesh first: it fuses the fronts, which the report then tells.
+    const mesh = surface.mesh();
+    return { mesh, report: surface.report() };
 }

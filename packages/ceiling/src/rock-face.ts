@@ -56,12 +56,16 @@ export interface IRockFace {
 }
 
 export interface IRockFaceReport {
-    /** Passes of subdivision, each one splitting every triangle in four. */
+    /** Passes of subdivision, each one splitting the edges still longer than the edge length. */
     refinements: number;
     triangles: number;
     vertices: number;
     /** Smallest, largest and mean move, metres. */
     displacement: { min: number; max: number; mean: number };
+    /** Vertices whose move was cut to a share of the room ahead of them: the rock, or the void, is thin there. */
+    limited: number;
+    /** Vertices whose move was cut again by the guard, because a face they hold had turned over. */
+    unturned: number;
 }
 
 /** Options of the rock field alone. */
@@ -273,11 +277,19 @@ export function createRockField(options: IRockFieldOptions = {}): RockField {
     return (east, north, up) => scale * recession(east / scale, up / scale, north / scale, minWavelength);
 }
 
-/** Splits every triangle in four at the middles of its edges; shared edges get one middle. */
-function subdivide(positions: number[], indices: number[]): number[] {
+/**
+ * Splits at its middle every edge longer than `longest`, and each triangle by the edges of it that were split: in two
+ * for one, in three for two, in four for three. An edge is split or not for both its triangles, so the mesh stays
+ * closed; only the long edges are touched, so a mesh with a few long edges does not grow everywhere.
+ */
+function subdivide(positions: number[], indices: number[], longest: number): number[] {
     const middles = new Map<number, number>();
     const vertices = positions.length / 3;
+    const length = (a: number, b: number): number =>
+        Math.hypot(positions[a * 3]! - positions[b * 3]!, positions[a * 3 + 1]! - positions[b * 3 + 1]!, positions[a * 3 + 2]! - positions[b * 3 + 2]!);
+    /** The middle of an edge to split, made once for its two triangles; -1 for an edge kept whole. */
     const middle = (a: number, b: number): number => {
+        if (length(a, b) <= longest) return -1;
         const key = a < b ? a * vertices + b : b * vertices + a;
         let at = middles.get(key);
         if (at === undefined) {
@@ -289,13 +301,35 @@ function subdivide(positions: number[], indices: number[]): number[] {
     };
     const next: number[] = [];
     for (let face = 0; face < indices.length; face += 3) {
-        const a = indices[face]!,
-            b = indices[face + 1]!,
-            c = indices[face + 2]!;
-        const ab = middle(a, b),
-            bc = middle(b, c),
-            ca = middle(c, a);
-        next.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
+        const corner = [indices[face]!, indices[face + 1]!, indices[face + 2]!];
+        const split = [middle(corner[0]!, corner[1]!), middle(corner[1]!, corner[2]!), middle(corner[2]!, corner[0]!)];
+        const count = split.filter((m) => m >= 0).length;
+        if (count === 0) {
+            next.push(corner[0]!, corner[1]!, corner[2]!);
+            continue;
+        }
+        if (count === 3) {
+            const [a, b, c] = corner as [number, number, number];
+            const [ab, bc, ca] = split as [number, number, number];
+            next.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
+            continue;
+        }
+        // Turned so that the edge from a to b is split, and, for two, the edge from b to c too: the order of the
+        // corners, and so the winding, is kept.
+        let turn = 0;
+        if (count === 1) turn = split.findIndex((m) => m >= 0);
+        else turn = (split.findIndex((m) => m < 0) + 1) % 3;
+        const [a, b, c] = [corner[turn]!, corner[(turn + 1) % 3]!, corner[(turn + 2) % 3]!];
+        const ab = split[turn]!,
+            bc = split[(turn + 1) % 3]!;
+        if (count === 1) {
+            next.push(a, ab, c, ab, b, c);
+            continue;
+        }
+        // Two: the corner at b, then the quad a, ab, bc, c by its shorter diagonal.
+        next.push(ab, b, bc);
+        if (length(a, bc) <= length(ab, c)) next.push(a, ab, bc, a, bc, c);
+        else next.push(a, ab, c, ab, bc, c);
     }
     return next;
 }
@@ -344,9 +378,198 @@ function vertexNormals(positions: ArrayLike<number>, indices: ArrayLike<number>)
     return normals;
 }
 
+/** Share of the room ahead of a vertex that its move may take. */
+const ROOM_SHARE = 0.4;
+/** A face is turned over when the cosine of the angle of its normal with the one it had is under this: 75 degrees. */
+const TURNED = 0.25;
+/** Passes of the guard that halve the moves round the faces turned over; after them, those moves are set to nothing. */
+const GUARD_PASSES = 12;
+
+/**
+ * The room ahead of the vertices of a surface. For a vertex and a unit direction normal to the surface there, it is
+ * the radius of the largest ball that touches the surface at the vertex, on the side of the direction, and holds
+ * nothing else of the surface. A move shorter than that radius stays on its side of the middle of a slab of rock, or
+ * of a narrow void, which the other face reaches from the other side.
+ *
+ * The ball is tried against the other vertices, and against the faces the line of the move goes through, of which it
+ * can hold half the distance. The vertices alone would miss a face right ahead and nearer than its own corners.
+ */
+class Room {
+    private readonly cell: number;
+    private readonly min: [number, number, number] = [Infinity, Infinity, Infinity];
+    private readonly count: [number, number, number] = [1, 1, 1];
+    private readonly vertexCells = new Map<number, number[]>();
+    private readonly faceCells = new Map<number, number[]>();
+    /** The query that last looked at each face: a face stands in several cells. */
+    private readonly seen: Uint32Array;
+    private query = 0;
+
+    /** `reach` is the largest diameter of a ball worth knowing: a larger ball limits no move. */
+    public constructor(
+        private readonly positions: ArrayLike<number>,
+        private readonly indices: ArrayLike<number>,
+        private readonly reach: number
+    ) {
+        this.cell = reach / 2;
+        this.seen = new Uint32Array(indices.length / 3);
+        const max = [-Infinity, -Infinity, -Infinity];
+        for (let at = 0; at < positions.length; at += 3)
+            for (let axis = 0; axis < 3; axis++) {
+                this.min[axis] = Math.min(this.min[axis]!, positions[at + axis]!);
+                max[axis] = Math.max(max[axis]!, positions[at + axis]!);
+            }
+        for (let axis = 0; axis < 3; axis++) this.count[axis] = Math.max(1, Math.floor((max[axis]! - this.min[axis]!) / this.cell) + 1);
+        for (let v = 0; v < positions.length / 3; v++)
+            this.add(this.vertexCells, this.key(this.at(positions[v * 3]!, 0), this.at(positions[v * 3 + 1]!, 1), this.at(positions[v * 3 + 2]!, 2)), v);
+        for (let face = 0; face < indices.length / 3; face++) {
+            const low = [Infinity, Infinity, Infinity],
+                high = [-Infinity, -Infinity, -Infinity];
+            for (let corner = 0; corner < 3; corner++)
+                for (let axis = 0; axis < 3; axis++) {
+                    const value = positions[indices[face * 3 + corner]! * 3 + axis]!;
+                    low[axis] = Math.min(low[axis]!, value);
+                    high[axis] = Math.max(high[axis]!, value);
+                }
+            for (let i = this.at(low[0]!, 0); i <= this.at(high[0]!, 0); i++)
+                for (let j = this.at(low[1]!, 1); j <= this.at(high[1]!, 1); j++)
+                    for (let k = this.at(low[2]!, 2); k <= this.at(high[2]!, 2); k++) this.add(this.faceCells, this.key(i, j, k), face);
+        }
+    }
+
+    private at(value: number, axis: number): number {
+        return Math.floor((value - this.min[axis]!) / this.cell);
+    }
+
+    /** The key of a cell, or -1 outside the grid. */
+    private key(i: number, j: number, k: number): number {
+        if (i < 0 || j < 0 || k < 0 || i >= this.count[0] || j >= this.count[1] || k >= this.count[2]) return -1;
+        return (i * this.count[1] + j) * this.count[2] + k;
+    }
+
+    private add(cells: Map<number, number[]>, key: number, value: number): void {
+        if (key < 0) return;
+        const list = cells.get(key);
+        if (list) list.push(value);
+        else cells.set(key, [value]);
+    }
+
+    /** The room ahead of a vertex along a unit direction, in metres: infinite when nothing stands within reach. */
+    public ahead(vertex: number, dx: number, dy: number, dz: number): number {
+        const p = this.positions;
+        const px = p[vertex * 3]!,
+            py = p[vertex * 3 + 1]!,
+            pz = p[vertex * 3 + 2]!;
+        const ci = this.at(px, 0),
+            cj = this.at(py, 1),
+            ck = this.at(pz, 2);
+        let radius = Infinity;
+
+        // The other vertices. A ball of radius r that touches the surface at p, its centre along d, holds q when
+        // |q - p|² < 2 r (q - p).d: the largest ball that does not hold q has the radius |q - p|² / (2 (q - p).d).
+        const farthest = this.reach * this.reach;
+        for (let i = ci - 2; i <= ci + 2; i++)
+            for (let j = cj - 2; j <= cj + 2; j++)
+                for (let k = ck - 2; k <= ck + 2; k++) {
+                    const list = this.vertexCells.get(this.key(i, j, k));
+                    if (!list) continue;
+                    for (const q of list) {
+                        const x = p[q * 3]! - px,
+                            y = p[q * 3 + 1]! - py,
+                            z = p[q * 3 + 2]! - pz;
+                        const ahead = x * dx + y * dy + z * dz;
+                        if (!(ahead > 0)) continue;
+                        const square = x * x + y * y + z * z;
+                        if (square < farthest) radius = Math.min(radius, square / (2 * ahead));
+                    }
+                }
+
+        // The faces on the line of the move, those of the vertex left out: the ball holds half the way to the nearest.
+        this.query++;
+        const ex = px + dx * this.reach,
+            ey = py + dy * this.reach,
+            ez = pz + dz * this.reach;
+        for (let i = this.at(Math.min(px, ex), 0); i <= this.at(Math.max(px, ex), 0); i++)
+            for (let j = this.at(Math.min(py, ey), 1); j <= this.at(Math.max(py, ey), 1); j++)
+                for (let k = this.at(Math.min(pz, ez), 2); k <= this.at(Math.max(pz, ez), 2); k++) {
+                    const list = this.faceCells.get(this.key(i, j, k));
+                    if (!list) continue;
+                    for (const face of list) {
+                        if (this.seen[face] === this.query) continue;
+                        this.seen[face] = this.query;
+                        const a = this.indices[face * 3]!,
+                            b = this.indices[face * 3 + 1]!,
+                            c = this.indices[face * 3 + 2]!;
+                        if (a === vertex || b === vertex || c === vertex) continue;
+                        const distance = this.crossing(px, py, pz, dx, dy, dz, a * 3, b * 3, c * 3);
+                        if (distance < this.reach) radius = Math.min(radius, distance / 2);
+                    }
+                }
+        return radius;
+    }
+
+    /** How far along a line from a point a triangle is, infinite when the line misses it (Möller and Trumbore). */
+    private crossing(px: number, py: number, pz: number, dx: number, dy: number, dz: number, a: number, b: number, c: number): number {
+        const p = this.positions;
+        const ux = p[b]! - p[a]!,
+            uy = p[b + 1]! - p[a + 1]!,
+            uz = p[b + 2]! - p[a + 2]!;
+        const vx = p[c]! - p[a]!,
+            vy = p[c + 1]! - p[a + 1]!,
+            vz = p[c + 2]! - p[a + 2]!;
+        const hx = dy * vz - dz * vy,
+            hy = dz * vx - dx * vz,
+            hz = dx * vy - dy * vx;
+        const det = ux * hx + uy * hy + uz * hz;
+        if (Math.abs(det) < 1e-12) return Infinity;
+        const sx = px - p[a]!,
+            sy = py - p[a + 1]!,
+            sz = pz - p[a + 2]!;
+        const s = (sx * hx + sy * hy + sz * hz) / det;
+        if (s < 0 || s > 1) return Infinity;
+        const qx = sy * uz - sz * uy,
+            qy = sz * ux - sx * uz,
+            qz = sx * uy - sy * ux;
+        const t = (dx * qx + dy * qy + dz * qz) / det;
+        if (t < 0 || s + t > 1) return Infinity;
+        const distance = (vx * qx + vy * qy + vz * qz) / det;
+        return distance > 1e-9 ? distance : Infinity;
+    }
+}
+
+/**
+ * The faces turned over by a move: those whose normal after it makes, with the normal they had, an angle of more than
+ * 75 degrees. A face without area before the move is left out; one without area after it counts.
+ */
+function facesTurned(before: ArrayLike<number>, after: ArrayLike<number>, indices: ArrayLike<number>): number[] {
+    const turned: number[] = [];
+    const normal = (positions: ArrayLike<number>, face: number): [number, number, number, number] => {
+        const a = indices[face]! * 3,
+            b = indices[face + 1]! * 3,
+            c = indices[face + 2]! * 3;
+        const ux = positions[b]! - positions[a]!,
+            uy = positions[b + 1]! - positions[a + 1]!,
+            uz = positions[b + 2]! - positions[a + 2]!;
+        const vx = positions[c]! - positions[a]!,
+            vy = positions[c + 1]! - positions[a + 1]!,
+            vz = positions[c + 2]! - positions[a + 2]!;
+        const nx = uy * vz - uz * vy,
+            ny = uz * vx - ux * vz,
+            nz = ux * vy - uy * vx;
+        return [nx, ny, nz, Math.hypot(nx, ny, nz)];
+    };
+    for (let face = 0; face < indices.length; face += 3) {
+        const [bx, by, bz, was] = normal(before, face);
+        if (!(was > 0)) continue;
+        const [ax, ay, az, is] = normal(after, face);
+        if (!(is > 0) || (ax * bx + ay * by + az * bz) / (was * is) < TURNED) turned.push(face / 3);
+    }
+    return turned;
+}
+
 /**
  * Turns a mesh into a rock face: refined to `edgeLength`, then each vertex moved along its normal into the rock by
- * the recession of the rock field, softly limited to `maxDisplacement`. The face seen from the void reads as rock;
+ * the recession of the rock field, softly limited to `maxDisplacement` and to a share of the room ahead of it, so
+ * that the face does not cross itself where the rock or the void is thin. The face seen from the void reads as rock;
  * relief under `detailWavelength` is left to the renderer.
  */
 export function buildRockFace(mesh: IRockFaceInput, options: IRockFaceOptions): IRockFace {
@@ -367,7 +590,7 @@ export function buildRockFace(mesh: IRockFaceInput, options: IRockFaceOptions): 
     let refinements = 0;
     while (indices.length > 0 && longestEdge(positions, indices) > edgeLength) {
         if (indices.length * 4 > maxFaces * 3) throw new RangeError(`Refining the rock face to ${edgeLength} m would make more than ${maxFaces} triangles.`);
-        indices = subdivide(positions, indices);
+        indices = subdivide(positions, indices, edgeLength);
         refinements++;
     }
 
@@ -376,9 +599,9 @@ export function buildRockFace(mesh: IRockFaceInput, options: IRockFaceOptions): 
     const displacement = new Float64Array(vertices);
     const limit = (d: number): number => (maxDisplacement > 0 ? maxDisplacement * Math.tanh(d / maxDisplacement) : 0);
     const moved = new Float64Array(positions.length);
-    let min = Infinity,
-        max = -Infinity,
-        sum = 0;
+    // A ball that limits a move has a radius under maxDisplacement / ROOM_SHARE: what it could hold is within its diameter.
+    const room = maxDisplacement > 0 ? new Room(positions, indices, (2 * maxDisplacement) / ROOM_SHARE) : null;
+    let limited = 0;
     for (let v = 0; v < vertices; v++) {
         const px = positions[v * 3]!,
             py = positions[v * 3 + 1]!,
@@ -389,6 +612,16 @@ export function buildRockFace(mesh: IRockFaceInput, options: IRockFaceOptions): 
         // The field is read where the face ends up, as in V25: three fixed-point steps.
         let d = 0;
         for (let step = 0; step < 3; step++) d = limit(sample(px + nx * d, py + ny * d, pz + nz * d));
+        // No further than a share of the room ahead, on the side the vertex moves to, the rock or the void: the two
+        // faces of a wedge of rock, each moving into it, would pass each other.
+        if (room && d !== 0) {
+            const side = d > 0 ? 1 : -1;
+            const most = ROOM_SHARE * room.ahead(v, nx * side, ny * side, nz * side);
+            if (Math.abs(d) > most) {
+                d = side * most;
+                limited++;
+            }
+        }
         const within = options.within;
         if (within && !within.contains(px + nx * d, py + ny * d, pz + nz * d)) {
             if (!within.contains(px, py, pz)) d = 0;
@@ -408,9 +641,39 @@ export function buildRockFace(mesh: IRockFaceInput, options: IRockFaceOptions): 
         moved[v * 3] = px + nx * d;
         moved[v * 3 + 1] = py + ny * d;
         moved[v * 3 + 2] = pz + nz * d;
+    }
+
+    // The guard: no face turned over. The moves of the vertices of such a face are halved, pass after pass, then set
+    // to nothing, which gives the face back as it was.
+    const held = new Uint8Array(vertices);
+    for (let pass = 0; ; pass++) {
+        const turned = facesTurned(positions, moved, indices);
+        if (turned.length === 0) break;
+        const factor = pass < GUARD_PASSES ? 0.5 : 0;
+        const marked = new Set<number>();
+        for (const face of turned) for (let corner = 0; corner < 3; corner++) marked.add(indices[face * 3 + corner]!);
+        let changed = false;
+        for (const v of marked) {
+            if (displacement[v] === 0) continue;
+            changed = true;
+            held[v] = 1;
+            const d = displacement[v]! * factor;
+            displacement[v] = d;
+            for (let axis = 0; axis < 3; axis++) moved[v * 3 + axis] = positions[v * 3 + axis]! + normals[v * 3 + axis]! * towardsRock * d;
+        }
+        if (!changed) break;
+    }
+
+    let min = Infinity,
+        max = -Infinity,
+        sum = 0,
+        unturned = 0;
+    for (let v = 0; v < vertices; v++) {
+        const d = displacement[v]!;
         min = Math.min(min, d);
         max = Math.max(max, d);
         sum += d;
+        unturned += held[v]!;
     }
     const triangles = Uint32Array.from(indices);
     return {
@@ -424,6 +687,8 @@ export function buildRockFace(mesh: IRockFaceInput, options: IRockFaceOptions): 
             triangles: triangles.length / 3,
             vertices,
             displacement: vertices > 0 ? { min, max, mean: sum / vertices } : { min: 0, max: 0, mean: 0 },
+            limited,
+            unturned,
         },
     };
 }

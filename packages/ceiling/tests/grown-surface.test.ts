@@ -32,8 +32,11 @@ function volumeOf(mesh: IGrownSurfaceMesh): number {
     return six / 6;
 }
 
-/** Checks that a mesh is one closed surface of the topology of a sphere, each edge shared by two faces wound alike. */
-function expectClosed(mesh: IGrownSurfaceMesh): void {
+/**
+ * Checks that a mesh is one closed surface, each edge shared by two faces wound alike, with `holes` holes through
+ * it: 0 is the topology of a sphere.
+ */
+function expectClosed(mesh: IGrownSurfaceMesh, holes = 0): void {
     const { indices } = mesh;
     const vertices = mesh.positions.length / 3;
     const edges = new Set<number>();
@@ -49,7 +52,7 @@ function expectClosed(mesh: IGrownSurfaceMesh): void {
     for (const edge of edges) if (!edges.has((edge % vertices) * vertices + Math.floor(edge / vertices))) unpaired++;
     expect(repeated).toBe(0);
     expect(unpaired).toBe(0);
-    expect(vertices - edges.size / 2 + indices.length / 3).toBe(2);
+    expect(vertices - edges.size / 2 + indices.length / 3).toBe(2 - 2 * holes);
 }
 
 /** Longest edge, and smallest angle of a face in degrees. */
@@ -89,7 +92,7 @@ describe("GrownSurface", () => {
         const surface = new GrownSurface(createSphereVolume(ORIGIN, 100), { seed: { x: 20, y: -10, z: 5 }, edgeLength: 10 });
         const mesh = surface.mesh();
 
-        expect(surface.report()).toEqual({ steps: 0, vertices: 12, faces: 20, free: 12, squeezed: 0, settled: 0, contact: 0, unresolved: 0, complete: false });
+        expect(surface.report()).toEqual({ steps: 0, vertices: 12, faces: 20, free: 12, squeezed: 0, settled: 0, contact: 0, fusion: null, unresolved: 0, complete: false });
         expectClosed(mesh);
         expect(volumeOf(mesh)).toBeGreaterThan(0);
         for (let i = 0; i < 36; i += 3) expect(Math.hypot(mesh.positions[i]! - 20, mesh.positions[i + 1]! + 10, mesh.positions[i + 2]! - 5)).toBeCloseTo(5, 9);
@@ -238,18 +241,37 @@ describe("GrownSurface", () => {
         expect(short.report.free).toBeGreaterThan(0);
     });
 
-    it("stops its two fronts short of each other round a pillar, and ends", () => {
+    it("fuses its two fronts where they meet round a pillar: a surface with a hole through it, as the ring", () => {
         // A slab with a pillar through it: a ring, which a surface of the topology of a sphere cannot fill whole.
+        const slab = createBoxVolume(ORIGIN, { x: 200, y: 200, z: 40 });
+        const pillar = createBoxVolume({ x: 60, y: 60, z: -1 }, { x: 140, y: 140, z: 41 });
+        const volume: IVolume = { contains: (x, y, z) => slab.contains(x, y, z) && !pillar.contains(x, y, z) };
+        const { mesh, report } = growSurface(volume, { seed: { x: 30, y: 30, z: 20 }, edgeLength: 10, fuse: true });
+
+        expect(report).toMatchObject({ complete: true, free: 0, unresolved: 0 });
+        expect(report.contact).toBeGreaterThan(0);
+        expect(report.fusion!.removed).toBeGreaterThan(0);
+        expect(report.fusion!.sewn).toBeGreaterThan(0);
+        // One hole through: the surface is a torus, closed, every edge met once in each direction.
+        expectClosed(mesh, 1);
+        // The wall the fronts left where they met is gone: the ring holds more than with the fronts left back to back.
+        const exact = 200 * 200 * 40 - 80 * 80 * 40;
+        const backToBack = volumeOf(growSurface(volume, { seed: { x: 30, y: 30, z: 20 }, edgeLength: 10, fuse: false }).mesh);
+        expect(volumeOf(mesh)).toBeGreaterThan(backToBack);
+        expect(volumeOf(mesh)).toBeGreaterThan(exact * 0.96);
+        expect(volumeOf(mesh)).toBeLessThan(exact * 1.01);
+    });
+
+    it("leaves the fronts that met as they stopped, back to back, unless asked to fuse them", () => {
         const slab = createBoxVolume(ORIGIN, { x: 200, y: 200, z: 40 });
         const pillar = createBoxVolume({ x: 60, y: 60, z: -1 }, { x: 140, y: 140, z: 41 });
         const volume: IVolume = { contains: (x, y, z) => slab.contains(x, y, z) && !pillar.contains(x, y, z) };
         const { mesh, report } = growSurface(volume, { seed: { x: 30, y: 30, z: 20 }, edgeLength: 10 });
 
-        expect(report).toMatchObject({ complete: true, free: 0, unresolved: 0 });
         expect(report.contact).toBeGreaterThan(0);
+        expect(report.fusion).toBeNull();
         expectClosed(mesh);
         expectInside(mesh, volume);
-        // The fronts met on the far side of the pillar: all the ring is filled but the thin wall between them.
         const exact = 200 * 200 * 40 - 80 * 80 * 40;
         expect(volumeOf(mesh)).toBeLessThan(exact);
         expect(volumeOf(mesh)).toBeGreaterThan(exact * 0.93);
