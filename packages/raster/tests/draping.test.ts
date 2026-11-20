@@ -34,6 +34,18 @@ describe("drapeCells", () => {
     });
 });
 
+describe("drapeCells on a cube", () => {
+    it("reads the pages of the face of the terrain tile", () => {
+        const pages = new ResidentTiles<number>();
+        pages.set({ face: 0, lod: 1, x: 0, y: 0 }, 1);
+        pages.set({ face: 3, lod: 1, x: 0, y: 0 }, 4);
+
+        expect(drapeCells(pages, { face: 3, lod: 1, x: 0, y: 0 }, 1).map((cell) => cell?.value)).toEqual([4, 4, 4, 4]);
+        expect(drapeCells(pages, { face: 0, lod: 1, x: 0, y: 0 }, 0)).toMatchObject([{ value: 1, size: 1 }]);
+        expect(drapeCells(pages, { face: 2, lod: 1, x: 0, y: 0 }, 1)).toEqual([undefined, undefined, undefined, undefined]);
+    });
+});
+
 describe("drapeDepth", () => {
     it("follows the deepest imagery tile presented inside the terrain tile, up to the maximum depth", () => {
         const cut = new ResidentTiles<true>();
@@ -58,5 +70,7 @@ describe("pageAffectsDrape", () => {
         expect(pageAffectsDrape({ lod: 4, x: 4, y: 4 }, terrain)).toBe(false);
         expect(pageAffectsDrape({ lod: 4, x: 4, y: 4 }, terrain, 2)).toBe(true);
         expect(pageAffectsDrape({ lod: 1, x: 1, y: 0 }, terrain)).toBe(false);
+        expect(pageAffectsDrape({ face: 3, lod: 2, x: 1, y: 1 }, { face: 3, ...terrain })).toBe(true);
+        expect(pageAffectsDrape({ face: 2, lod: 2, x: 1, y: 1 }, { face: 3, ...terrain })).toBe(false);
     });
 });
