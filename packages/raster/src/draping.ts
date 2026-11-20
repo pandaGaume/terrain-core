@@ -3,8 +3,8 @@ import type { IResidentTileCover, ITileAddress, ResidentTiles } from "@spacexr/t
 /**
  * Raster pages draped on a terrain tile divided into `2^depth x 2^depth` cells, row-major from the north-west cell.
  *
- * Each cell is a tile `depth` levels below the terrain tile and uses the deepest resident page containing it: its own
- * page, or the page of a coarser tile. The area of each cover locates the cell in its page: cell coordinates `(s, t)`
+ * Each cell is a tile `depth` levels below the terrain tile, on the same root (the face of a cube), and uses the deepest
+ * resident page containing it: its own page, or the page of a coarser tile. The area of each cover locates the cell in its page: cell coordinates `(s, t)`
  * in `[0, 1]` sample the page at `(west + s * size, north + t * size)`. A cell without any resident page is
  * `undefined`.
  */
@@ -14,10 +14,11 @@ export type DrapeCells<T> = readonly (IResidentTileCover<T> | undefined)[];
 export function drapeCells<T>(pages: ResidentTiles<T>, terrainTile: ITileAddress, depth: number, minLOD = 0): DrapeCells<T> {
     if (!Number.isInteger(depth) || depth < 0) throw new RangeError("The drape depth must be a non-negative integer.");
     const count = 2 ** depth;
+    const root = terrainTile.face === undefined ? {} : { face: terrainTile.face };
     const cells: (IResidentTileCover<T> | undefined)[] = [];
     for (let row = 0; row < count; row++) {
         for (let column = 0; column < count; column++) {
-            cells.push(pages.cover({ lod: terrainTile.lod + depth, x: terrainTile.x * count + column, y: terrainTile.y * count + row }, minLOD));
+            cells.push(pages.cover({ ...root, lod: terrainTile.lod + depth, x: terrainTile.x * count + column, y: terrainTile.y * count + row }, minLOD));
         }
     }
     return cells;
@@ -34,8 +35,12 @@ export function drapeDepth(cut: ResidentTiles<unknown>, terrainTile: ITileAddres
     return cut.depthWithin(terrainTile, maxDepth) ?? 0;
 }
 
-/** Whether a page change can alter the drape of a terrain tile: the page overlaps it at most `maxDepth` levels finer. */
+/**
+ * Whether a page change can alter the drape of a terrain tile: the page overlaps it at most `maxDepth` levels finer, on
+ * the same root.
+ */
 export function pageAffectsDrape(page: ITileAddress, terrainTile: ITileAddress, maxDepth = 1): boolean {
+    if ((page.face ?? 0) !== (terrainTile.face ?? 0)) return false;
     if (page.lod > terrainTile.lod + maxDepth) return false;
     const [coarse, fine] = page.lod <= terrainTile.lod ? [page, terrainTile] : [terrainTile, page];
     const scale = 2 ** (fine.lod - coarse.lod);
